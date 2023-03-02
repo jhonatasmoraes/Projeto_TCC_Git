@@ -11,7 +11,7 @@
 
 QMC5883LCompass compass;
 
-
+/*
 //Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 
 //O calculo do desvio magnético pode ser calculado pelos dados encontrados no site https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
@@ -186,16 +186,16 @@ void setup() {
 }
 
 void loop() {
-/*
-  while (Serial2.available() > 0)
-    if(gps.encode(Serial2.read()))
-      displayInfo(); //Mostrar as informações quando tiver
-  if (millis() > 5000 && gps.charsProcessed() < 10)
-  {
-    Serial.println(F("No GPS detected: check wiring."));
-    while (true);
-  }
-*/
+
+//  while (Serial2.available() > 0)
+//    if(gps.encode(Serial2.read()))
+//      displayInfo(); //Mostrar as informações quando tiver
+//  if (millis() > 5000 && gps.charsProcessed() < 10)
+//  {
+//    Serial.println(F("No GPS detected: check wiring."));
+//    while (true);
+//  }
+
  
 // Display the results (magnetic vector values are in micro-Tesla (uT)) 
 //Serial.print("X: ");
@@ -241,3 +241,93 @@ void loop() {
   // put your main code here, to run repeatedly:
 }
 
+*/
+
+
+
+
+
+
+void calibrar_qmc5883(){
+
+  Serial.println("A calibrção começa em 5 segundos, movimente o dispositivo");
+  delay(5000);
+
+  //int t_atual = millis(); //marca o instante de inicio agora
+  int tempo_final = millis() + 5000; //marca o instante de final da calibração
+
+  int max_x = -32768;
+  int min_x = 32767;
+  int max_y = -32768;
+  int min_y = 32767;
+  //int max_z = -32768;
+  //int min_z = 32767;
+  bool novo_v = false;
+  bool pronto = false;
+  int x, y; //, z;
+
+  while(!pronto){
+    compass.read();
+    x = compass.getX();
+    y = compass.getY();
+    //z = compass.getZ();
+    novo_v = false;
+    if (x > max_x) max_x = x; novo_v = true;
+    if (x < min_x) min_x = x; novo_v = true;
+    if (y > max_y) max_y = y; novo_v = true;
+    if (y < min_y) min_y = y; novo_v = true;
+    //if (z > max_z) max_z = z; novo_v = true;
+    //if (z < min_z) min_z = z; novo_v = true;
+    if (novo_v && !pronto) tempo_final = millis() + 5000; Serial.println("Calibrando . . .");
+    if(millis() > tempo_final) pronto = true; compass.setCalibration(min_x, max_x, min_y, max_y, -32768, 32767);
+  }
+}
+
+int btn_1 = 32;
+int btn_2 = 33;
+int btn_3 = 34;
+
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  compass.init();
+  pinMode(btn_1,INPUT_PULLUP);
+  pinMode(btn_2,INPUT_PULLUP);
+  pinMode(btn_3,INPUT_PULLUP);
+}
+
+void loop() {
+  int x, y, z;
+  //compass.read(&x, &y, &z);
+  compass.read();
+  x = compass.getX();
+  y = compass.getY();
+  z = compass.getZ();
+
+
+  // Calibrate the readings
+  //int offset_x = 161; // Replace with your own calibration value
+  //int offset_y = -1541; // Replace with your own calibration value
+  //int offset_z = 0; // Replace with your own calibration value
+
+  //x = x - offset_x;
+  //y = y - offset_y;
+  //z = z - offset_z;
+
+  // Calculate the heading
+  float heading = atan2(y, x);
+  if (heading < 0) {
+    heading = 2 * PI + heading;
+  }
+  heading = heading + radians(-19); // Magnetic declination of -19 degrees
+  if (heading < 0) {
+    heading = 2 * PI + heading;
+  }
+  float degrees = heading * 180 / PI;
+
+  Serial.print("Heading: ");
+  Serial.println(degrees);
+
+  delay(100);
+}
