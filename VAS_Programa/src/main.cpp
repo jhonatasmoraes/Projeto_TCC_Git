@@ -9,6 +9,7 @@
 #include <ESP32Servo.h>
 #include <SPI.h>
 #include <SD.h>
+#include <TinyGPSPlus.h>
 
 
 /*
@@ -20,13 +21,17 @@
 */
 
 File myFile;
-const int CS = 5;
+
+const int CS = 5; //Pino Chipselect
 QMC5883LCompass compass;
 U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 Servo ESCA; //motor direito
 Servo ESCB; //motor esquerdo
 ESP32PWM pwm;
 #define EEPROM_SIZE 8
+TinyGPSPlus gps;
+
+
 
 
 //auxiliares
@@ -97,45 +102,103 @@ int TelaAtual=0;
 
 float direc = 0;
 
+//#define PI 3.14159265359
+
 const float declinacao = -19.85; //O ajuste deve ser negativo, assim o norte é apontado pela direção X
 
+float Latitude = 0;
+float Longitude = 0;
+
+float dLat = 0;
+float dLon = 0;
+float lat1_rad = 0;
+float lat2_rad = 0;
+float yPoint = 0;
+float xPoint = 0;
+float bearing = 0;
+float distancia = 0;
+float raioterra = 6371000;
 
 
 
-void WriteFile(const char * path, const char * message){
-  // open the file. note that only one file can be open at a time,
-  // so you have to close this one before opening another.
-  myFile = SD.open(path, FILE_WRITE);
-  // if the file opened okay, write to it:
+int coordenada = 0;
+//int NUMCOORD = 6;
+//float LatAlvo[] = {-26.809797, -26.810044, -26.810049, -26.810387, -26.810471, -26.810723, -26.810944};
+//float LonAlvo[] = {-49.103512, -49.103228, -49.102701, -49.102745, -49.101955, -49.102366, -49.101547};
+const int QtdPontos = 20;
+float LatAlvo[QtdPontos]; //Prepara as arrays para receberem até 20 pontos
+float LonAlvo[QtdPontos];
+bool PontoLeitura[QtdPontos]; //Separa os pontos em que deve ser feita a leitura dos valores
+bool PontoColeta[QtdPontos]; //Separa os pontos em que devem ser coletados a água 
+int PontosLidos = 0;
+
+
+float LatZero = 0;
+float LonZero = 0;
+
+
+//-26.809797, -49.103512 portao
+//-26.810044, -49.103228 frente do bloco 1
+//-26.810049, -49.102701 lado do parquinho
+//-26.810387, -49.102745 lado do bicicletario daa janela
+//-26.810471, -49.101955 fundo da quadra
+//-26.810723, -49.102366 meio do T fundo
+//-26.810944, -49.101547 lado da ETA
+
+
+//Lê as 20 coordenadas disponibilizadas no arquivo "coordenadas.txt" dentro do cartão SD e armazena as instruções nas variaveis LatAlvo, LonAlvo, PontoLeitura e PontoColeta
+void LerCoordenadas(){
+  myFile = SD.open("/coordenadas.txt", FILE_READ);
   if (myFile) {
-    Serial.printf("Writing to %s ", path);
-    myFile.println(message);
-    myFile.close(); // close the file:
-    Serial.println("completed.");
-  } 
-  // if the file didn't open, print an error:
-  else {
-    Serial.println("error opening file ");
-    Serial.println(path);
+    while (myFile.available()) {
+      PontosLidos = 0;
+      for (int i=0; i<QtdPontos; i++){
+      String coordenadas = myFile.readStringUntil(';');
+      sscanf(coordenadas.c_str(), "%f, %f, %d, %d", &LatAlvo[i], &LonAlvo[i], &PontoLeitura[i], &PontoColeta[i]); //Armazena em cada um dos elementos do array a coordenada alvo desejada
+      if(LatAlvo[i] !=0 && LatAlvo[i]!=0){PontosLidos += 1;}
+      Serial.print("Parametros[");
+      Serial.print(i);
+      Serial.print("]: ");
+      Serial.print(LatAlvo[i],10);
+      Serial.print(" ");
+      Serial.print(LonAlvo[i],10);
+      Serial.print(" ");
+      Serial.print(PontoLeitura[i]);
+      Serial.print(" ");
+      Serial.println(PontoColeta[i]);
+      }
+    }
+    myFile.close();
+  } else {
+    Serial.println("Erro ao abrir o arquivo de coordenadas.");
   }
 }
 
 
-void ReadFile(const char * path){
-  // open the file for reading:
-  myFile = SD.open(path);
-  if (myFile) {
-     Serial.printf("Reading file from %s\n", path);
-     // read from the file until there's nothing else in it:
-    while (myFile.available()) {
-      Serial.write(myFile.read());
-      saida = myFile.read();
-    }
-    myFile.close(); // close the file:
-  } 
-  else {
-    // if the file didn't open, print an error:
-    Serial.println("error opening test.txt");
+
+float CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe coordenadas em graus decimais
+  dLat = (lat2 - lat1) * PI / 180; // Diferença de latitude em radianos
+  dLon = (lon2 - lon1) * PI / 180; // Diferença de longitude em radianos
+  lat1_rad = lat1 * PI / 180; // Latitude da primeira coordenada em radianos
+  lat2_rad = lat2 * PI / 180; // Latitude da segunda coordenada em radianos
+  yPoint = sin(dLon) * cos(lat2_rad);
+  xPoint = cos(lat1_rad) * sin(lat2_rad) - sin(lat1_rad) * cos(lat2_rad) * cos(dLon);
+  bearing = atan2(yPoint, xPoint) * 180 / PI - declinacao; // Cálculo do ângulo em graus
+  if(bearing < 0){bearing += 360;}
+
+  distancia = 2 * raioterra * asin(sqrt(pow(sin(dLat/2),2) + cos(lat1_rad)*cos(lat2_rad)*pow(sin(dLon/2),2)));
+
+  return bearing;
+}
+
+
+void leGPS(){
+
+  while (Serial2.available()){gps.encode(Serial2.read());}
+
+  if(gps.location.isValid()){
+    Latitude  = gps.location.lat(); // float
+    Longitude = gps.location.lng(); // float
   }
 }
 
@@ -283,10 +346,41 @@ case 1:
   break;
 
 case 2: //Reservado GPS
+    leGPS();
+    
     u8g2.firstPage();
   do{
-    u8g2.setFont(u8g2_font_7x14B_tf);
-    u8g2.drawStr(4,15,"A Desenvolver");//cabe 12
+    u8g2.setFont(u8g2_font_squeezed_r6_tr);
+    u8g2.drawStr(1,8,"Latitude / Longitude Atual");//cabe 12
+    u8g2.setCursor(0, 16);
+    u8g2.print(Latitude,6);
+    u8g2.setCursor(52, 16);
+    u8g2.print("/");
+    u8g2.setCursor(60, 16);
+    u8g2.print(Longitude,6);
+    u8g2.drawStr(1,24,"Latitude / Longitude Alvo");//cabe 12
+    u8g2.setCursor(0,32);
+    u8g2.print(LatAlvo[coordenada],6);
+    u8g2.setCursor(52, 32);
+    u8g2.print("/");
+    u8g2.setCursor(60, 32);
+    u8g2.print(LonAlvo[coordenada],6);
+    u8g2.drawStr(1,40,"Mag Alvo / Mag Atual");//cabe 12
+    u8g2.setCursor(0,48);
+    u8g2.print(CalcDirecDist(Latitude,Longitude, LatAlvo[coordenada], LonAlvo[coordenada]),3);
+    u8g2.setCursor(52, 48);
+    u8g2.print("/");
+    u8g2.setCursor(60, 48);
+    u8g2.print(direc,3);
+    u8g2.setCursor(60, 56);
+    u8g2.print(coordenada);
+
+
+
+
+
+
+
   }while(u8g2.nextPage());
 
   break;
@@ -309,7 +403,7 @@ case 4:
   do{
     u8g2.setFont(u8g2_font_7x14B_tf);
     u8g2.drawStr(4,15,"Escrevendo...");//cabe 12
-    WriteFile("/test.txt", "ElectronicWings.com");
+    //WriteFile("/test.txt", "ElectronicWings.com");
     u8g2.setCursor(4, 37);
     u8g2.print("Pronto");
   }while(u8g2.nextPage());
@@ -320,10 +414,22 @@ case 5:
   do{
     u8g2.setFont(u8g2_font_7x14B_tf);
     u8g2.drawStr(4,15,"Lendo...");//cabe 12
-    ReadFile("/test.txt");
-    u8g2.setCursor(4, 37);
-    u8g2.print(saida);
   }while(u8g2.nextPage());
+
+
+  LerCoordenadas();
+  delay(500);
+  TelaAtual = 0;
+
+      u8g2.firstPage();
+  do{
+    u8g2.setFont(u8g2_font_7x14B_tf);
+    u8g2.drawStr(4,15,"Coordenadas lidas");//cabe 12
+    u8g2.setCursor(4, 37);
+    u8g2.print(PontosLidos);
+    u8g2.print(" pontos");
+  }while(u8g2.nextPage());
+  delay(2000);
   break;
 
 
@@ -398,56 +504,52 @@ default:
 
 
 
-
-
-
-
-
-
 void setup(void) {
-  compass.init();
+
+
+  //Inicializa diplay
   u8g2.begin();
+  //Inicializa portas seriais (Serial0 = USB; Serial2 = GPS)
   Serial.begin(115200);
+  Serial2.begin(9600);
+  //Inicializa EEPROM e carrega os parâmetros de calibração do magnetômetro
   EEPROM.begin(EEPROM_SIZE);
   min_x=EEPROM.read(0)<<8|EEPROM.read(1);
   max_x=EEPROM.read(2)<<8|EEPROM.read(3);
   min_y=EEPROM.read(4)<<8|EEPROM.read(5);
   max_y=EEPROM.read(6)<<8|EEPROM.read(7);
-  compass.setCalibration(min_x, max_x, min_y, max_y, -32768, 32767); 
+  //Inicializa o magnetômetro e aplica os parâmetros de calibração carregados da EEPROM (Apenas valores de x e y são importantes)
+  compass.init();
+  compass.setCalibration(min_x, max_x, min_y, max_y, -32768, 32767);
+  //Prepara os pinos de entrada para os botões
   pinMode(btn_1, INPUT_PULLUP);
   pinMode(btn_2, INPUT_PULLUP);
   pinMode(btn_3, INPUT_PULLUP);
   TelaAtual = 0;
 
+  //Prepara os parâmtros dos ESCs conectados 
   ESP32PWM::allocateTimer(0);
 	ESP32PWM::allocateTimer(1);
- 
   ESCA.setPeriodHertz(50);      // Standard 50hz servo
 	ESCB.setPeriodHertz(50);      // Standard 50hz servo
   // pwm.attachPin(4, 10000);//10khz
   ESCA.attach(ESCA_Pin, minUs, maxUs);
   ESCB.attach(ESCB_Pin, minUs, maxUs);
   delay(500);
-  while (!Serial) { ; }  // wait for serial port to connect. Needed for native USB port only
+  ESCA_Vel = 90; //velocidade inicial dos ESCs (ponto "zero", meio do curso)
+  ESCB_Vel = 90;  
+  ESCA.write(ESCA_Vel);
+  ESCB.write(ESCB_Vel);
+  //Inicializa cartão SD
   Serial.println("Initializing SD card...");
   if (!SD.begin(CS)) {
     Serial.println("initialization failed!");
     return;
   }
   Serial.println("initialization done.");
-
-delay(100);
-ESCA_Vel = 90; //velocidade inicial
-ESCB_Vel = 90;
-ESCA.write(ESCA_Vel);
-ESCB.write(ESCB_Vel);
-
-
-//declinacao = 0;
 }
 
 void loop(void) {
-
 
   if((digitalRead(btn_1) == LOW)&&(btn_1_clic == 0)){
     if(TelaAtual == 0){
@@ -461,6 +563,9 @@ void loop(void) {
       ESCB_Vel-= 10;
       if(ESCB_Vel<0){ESCB_Vel = 0;}
       ESCB.write(ESCB_Vel);
+    }else if(TelaAtual == 2){
+        coordenada = coordenada-1;
+        if(coordenada<0){coordenada = PontosLidos;}
     }
 
     btn_1_clic = 1;
@@ -478,6 +583,9 @@ void loop(void) {
       ESCB_Vel += 10;
       if(ESCB_Vel > 180){ESCB_Vel = 180;}
       ESCB.write(ESCB_Vel);
+    }else if(TelaAtual == 2){
+        coordenada = coordenada+1;
+        if(coordenada>= PontosLidos){coordenada = 0;}
     }
 
     btn_2_clic = 1;
