@@ -37,6 +37,7 @@ TinyGPSPlus gps;
 //auxiliares
 float alvo = 50;
 float apontar = 0;
+bool partiu = false;
 
 
 //pinos
@@ -57,7 +58,7 @@ int ESCB_Vel = 90;
 //Parametros controle
 float Kp = 0.0;
 float Ki = 0.0;
-float Kd = 0.0;
+//float Kd = 0.0;
 float erro = 0;
 
 
@@ -137,15 +138,6 @@ float LatZero = 0;
 float LonZero = 0;
 
 
-//-26.809797, -49.103512 portao
-//-26.810044, -49.103228 frente do bloco 1
-//-26.810049, -49.102701 lado do parquinho
-//-26.810387, -49.102745 lado do bicicletario daa janela
-//-26.810471, -49.101955 fundo da quadra
-//-26.810723, -49.102366 meio do T fundo
-//-26.810944, -49.101547 lado da ETA
-
-
 //Lê as 20 coordenadas disponibilizadas no arquivo "coordenadas.txt" dentro do cartão SD e armazena as instruções nas variaveis LatAlvo, LonAlvo, PontoLeitura e PontoColeta
 void LerCoordenadas(){
   myFile = SD.open("/coordenadas.txt", FILE_READ);
@@ -174,8 +166,6 @@ void LerCoordenadas(){
   }
 }
 
-
-
 float CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe coordenadas em graus decimais
   dLat = (lat2 - lat1) * PI / 180; // Diferença de latitude em radianos
   dLon = (lon2 - lon1) * PI / 180; // Diferença de longitude em radianos
@@ -191,7 +181,13 @@ float CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe co
   return bearing;
 }
 
+void Navegar(){
+  //Armazena as coordenadas de partida
+ // if(!partiu){leGPS();  LatZero = Latitude;  LonZero = Longitude;  partiu = true;}
 
+}
+
+//------------------------------------------------Le GPS------------------------------------------------------------
 void leGPS(){
 
   while (Serial2.available()){gps.encode(Serial2.read());}
@@ -201,8 +197,7 @@ void leGPS(){
     Longitude = gps.location.lng(); // float
   }
 }
-
-
+//----------------------------------------------Calibra magnetometro------------------------------------------------
 void calibrar_qmc5883(){
   ////////u8g2.clearDisplay();
   //u8g2.setCursor(0,0);
@@ -261,7 +256,7 @@ void calibrar_qmc5883(){
       }
   }
 }
-
+//-------------------------------------------Calcula graus----------------------------------------------------------
 void CalculaGraus(){
 
   compass.read();
@@ -273,7 +268,7 @@ void CalculaGraus(){
     direc += 360;
   }
 }
-
+//-----------------------------------------------Controla ESCs------------------------------------------------------
 void ControlaESC(){
 
   CalculaGraus();
@@ -294,7 +289,7 @@ if(ESCB_Vel > 180){ESCB_Vel = 180;}else if(ESCB_Vel<0){ESCB_Vel = 0;}
   ESCA.write(ESCA_Vel);
   ESCB.write(ESCB_Vel);
 }
-
+//------------------------------------------Mostra Tela-------------------------------------------------------------
 void MostraTela(){
 u8g2.setBitmapMode(1); //faz os bitmaps transparentes
 
@@ -374,11 +369,6 @@ case 2: //Reservado GPS
     u8g2.print(direc,3);
     u8g2.setCursor(60, 56);
     u8g2.print(coordenada);
-
-
-
-
-
 
 
   }while(u8g2.nextPage());
@@ -469,19 +459,17 @@ case 8:
   do{
     u8g2.setFont(u8g2_font_7x14B_tf);
     u8g2.drawStr(4,15,"Caminhando");//cabe 12
-
-    ControlaESC();
     u8g2.setCursor(4, 30);
     u8g2.print(alvo);
     u8g2.setCursor(48, 30);
     u8g2.print(direc);
-
     u8g2.setCursor(4, 45);
     u8g2.print(ESCA_Vel);
     u8g2.setCursor(35, 45);
     u8g2.print(ESCB_Vel);
-
   }while(u8g2.nextPage());
+  //Escreve os valores nos ESCs
+    ControlaESC();
   break;
 
 case 9:
@@ -501,9 +489,7 @@ default:
   break;
 }
 }
-
-
-
+//----------------------------------------------Setup---------------------------------------------------------------
 void setup(void) {
 
 
@@ -548,9 +534,9 @@ void setup(void) {
   }
   Serial.println("initialization done.");
 }
-
+//----------------------------------------------Loop----------------------------------------------------------------
 void loop(void) {
-
+//Comandos para botão 1 (desce)
   if((digitalRead(btn_1) == LOW)&&(btn_1_clic == 0)){
     if(TelaAtual == 0){
       item_sel = item_sel-1;
@@ -570,7 +556,7 @@ void loop(void) {
 
     btn_1_clic = 1;
   }
-
+//Comandos para botão 2 (sobe)
   if((digitalRead(btn_2) == LOW)&&(btn_2_clic == 0)){
     if(TelaAtual == 0){
       item_sel = item_sel+1;
@@ -590,7 +576,7 @@ void loop(void) {
 
     btn_2_clic = 1;
   }
-
+//Comandos para botão 3 (entra)
   if((digitalRead(btn_3) == LOW)&&(btn_3_clic == 0)){
     
     if(TelaAtual == 0){
@@ -640,22 +626,21 @@ void loop(void) {
 
   }
 
+//Debounce dos botões
 if((digitalRead(btn_1) == HIGH)&&(btn_1_clic == 1)){btn_1_clic = 0;}
 if((digitalRead(btn_2) == HIGH)&&(btn_2_clic == 1)){btn_2_clic = 0;}
 if((digitalRead(btn_3) == HIGH)&&(btn_3_clic == 1)){btn_3_clic = 0;}
-
+//Corrige os limites da tela inicial
   item_ant = item_sel-1;
   if(item_ant<0){item_ant = NUM_ITENS-1;}
   item_pos = item_sel+1;
   if(item_pos >= NUM_ITENS){item_pos = 0;}
+//
+
+
 
 CalculaGraus();
 MostraTela();
-
-
-
-
-
 
   //delay(1000);
 }
