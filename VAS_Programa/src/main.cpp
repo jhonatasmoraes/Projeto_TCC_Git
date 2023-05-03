@@ -24,7 +24,7 @@ File myFile;
 
 const int CS = 5; //Pino Chipselect
 QMC5883LCompass compass;
-U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
 Servo ESCA; //motor direito
 Servo ESCB; //motor esquerdo
 ESP32PWM pwm;
@@ -38,15 +38,22 @@ TinyGPSPlus gps;
 float alvo = 50;
 float apontar = 0;
 bool partiu = false;
+int tempoblink = 0;
+bool estadoblink = false;
 
 
 //pinos
 
-int ESCA_Pin = 25;
-int ESCB_Pin = 26;
-int btn_1 = 14; //Botao desce32
-int btn_2 = 12; //Botao sobe33
-int btn_3 = 13; //Botao entra34
+int ESCA_Pin = 12;   //25
+int ESCB_Pin = 13;  //26
+int btn_1 = 14; //Botao SOBE14 laranja btn2
+int btn_2 = 4; //Botao DESCE12 vermelho btn1 
+int btn_3 = 15; //Botao entra13 amarelo btn3
+int bomba1 = 33;
+int bomba2 = 25;
+int bomba3 = 26;
+int bomba4 = 27;
+int ds1820 = 32;
 
 //Parametros Motores
 
@@ -138,6 +145,28 @@ float LatZero = 0;
 float LonZero = 0;
 
 
+//Variaveis PID
+
+float setpoint = 0.0;  // Valor desejado
+float kp = 0.5;        // Coeficiente proporcional
+float ki = 0.2;        // Coeficiente integral
+float kd = 0.1;        // Coeficiente derivativo
+float sensor_value = 0.0;  // Valor do sensor
+float output = 0.0;    // Saída do controlador
+float error = 0.0;     // Erro atual
+float last_error = 0.0; // Último erro
+float proportional = 0.0;
+float integral = 0.0;  // Soma do erro
+float derivative = 0.0;  // Variação do erro
+unsigned long last_time = 0;  // Último tempo de atualização
+unsigned long dt = 10;  // Intervalo de tempo em milissegundos
+
+
+
+
+
+
+
 //Lê as 20 coordenadas disponibilizadas no arquivo "coordenadas.txt" dentro do cartão SD e armazena as instruções nas variaveis LatAlvo, LonAlvo, PontoLeitura e PontoColeta
 void LerCoordenadas(){
   myFile = SD.open("/coordenadas.txt", FILE_READ);
@@ -166,7 +195,7 @@ void LerCoordenadas(){
   }
 }
 
-float CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe coordenadas em graus decimais
+void CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe coordenadas em graus decimais
   dLat = (lat2 - lat1) * PI / 180; // Diferença de latitude em radianos
   dLon = (lon2 - lon1) * PI / 180; // Diferença de longitude em radianos
   lat1_rad = lat1 * PI / 180; // Latitude da primeira coordenada em radianos
@@ -178,8 +207,36 @@ float CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe co
 
   distancia = 2 * raioterra * asin(sqrt(pow(sin(dLat/2),2) + cos(lat1_rad)*cos(lat2_rad)*pow(sin(dLon/2),2)));
 
-  return bearing;
+  //return bearing;
 }
+
+void CalculaPIDDirec(){
+  //dt = millis() - last_time;//***atualiza dt
+  if(millis() - last_time > dt){
+  sensor_value = direc; //Leitura da direção atual
+  error = bearing - sensor_value; //Compara com a direção desejada
+  proportional = kp * error;
+  integral += ki * error * dt;
+  derivative = kd * (error - last_error) / dt;
+  output = proportional + integral + derivative;
+  if (output > 255) {
+    output = 255;
+  } else if (output < 0) {
+    output = 0;
+  }
+  last_error = error;
+  last_time = millis();
+
+}
+  //analogWrite(9, output);
+  
+  // Espera o intervalo de tempo especificado
+  //while (millis() - last_time < dt) {
+  //  delay(1);
+  //}
+
+}
+
 
 void Navegar(){
   //Armazena as coordenadas de partida
@@ -342,7 +399,7 @@ case 1:
 
 case 2: //Reservado GPS
     leGPS();
-    
+    CalcDirecDist(Latitude,Longitude, LatAlvo[coordenada], LonAlvo[coordenada]);
     u8g2.firstPage();
   do{
     u8g2.setFont(u8g2_font_squeezed_r6_tr);
@@ -362,7 +419,7 @@ case 2: //Reservado GPS
     u8g2.print(LonAlvo[coordenada],6);
     u8g2.drawStr(1,40,"Mag Alvo / Mag Atual");//cabe 12
     u8g2.setCursor(0,48);
-    u8g2.print(CalcDirecDist(Latitude,Longitude, LatAlvo[coordenada], LonAlvo[coordenada]),3);
+    u8g2.print(bearing,3);
     u8g2.setCursor(52, 48);
     u8g2.print("/");
     u8g2.setCursor(60, 48);
@@ -511,6 +568,10 @@ void setup(void) {
   pinMode(btn_1, INPUT_PULLUP);
   pinMode(btn_2, INPUT_PULLUP);
   pinMode(btn_3, INPUT_PULLUP);
+  pinMode(bomba1, OUTPUT);
+  pinMode(bomba2, OUTPUT);
+  pinMode(bomba3, OUTPUT);
+  pinMode(bomba4, OUTPUT);
   TelaAtual = 0;
 
   //Prepara os parâmtros dos ESCs conectados 
@@ -641,6 +702,20 @@ if((digitalRead(btn_3) == HIGH)&&(btn_3_clic == 1)){btn_3_clic = 0;}
 
 CalculaGraus();
 MostraTela();
+
+if (millis() > (tempoblink + 1000)){
+  if(estadoblink == false){
+    estadoblink = true;
+  }else{
+    estadoblink = false;
+  }
+  digitalWrite(bomba1, estadoblink);
+  digitalWrite(bomba2, estadoblink);
+  digitalWrite(bomba3, estadoblink);
+  digitalWrite(bomba4, estadoblink);
+
+  tempoblink = millis();
+}
 
   //delay(1000);
 }

@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "Base")(type "KiCad")(uri "C:/Users/jhona/Desktop/Projeto_TCC_Git/Placas/Base.pretty")(options "")(descr ""))
+)
