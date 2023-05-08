@@ -97,10 +97,6 @@ const float declinacao = -19.85; //O ajuste deve ser negativo, assim o norte é 
 
 //auxiliares
 float alvo = 50;
-float apontar = 0;
-bool partiu = false;
-int tempoblink = 0;
-bool estadoblink = false;
 bool StartScreen = true;
 
 
@@ -124,11 +120,8 @@ int ESCA_Vel = 90; //velocidade inicial
 int ESCB_Vel = 90;
 //O angulo do servo se dá de 0 a 180, onde 90 é o motor parado.
 
-//Parametros PID controle de direção
-float Kp = 0.0;
-float Ki = 0.0;
-float Kd = 0.0;
-float erro = 0;
+
+
 
 //***Verificar necessidade e apagar
 //Outras variaveis
@@ -177,9 +170,6 @@ int TelaAtual=0;
 
 float direc = 0;
 
-//#define PI 3.14159265359
-
-
 
 float Latitude = 0;
 float Longitude = 0;
@@ -207,17 +197,11 @@ bool PontoLeitura[QtdPontos]; //Separa os pontos em que deve ser feita a leitura
 bool PontoColeta[QtdPontos]; //Separa os pontos em que devem ser coletados a água 
 int PontosLidos = 0;
 
-int pontoteste = 0;
-
-
-float LatZero = 0;
-float LonZero = 0;
 
 
 //Variaveis PID
 
-float setpoint = 0.0;  // Valor desejado
-float kp = 0.5;        // Coeficiente proporcional
+float kp = 1;        // Coeficiente proporcional
 float ki = 0.0;        // Coeficiente integral
 float kd = 0.0;        // Coeficiente derivativo
 float output = 0.0;    // Saída do controlador
@@ -227,7 +211,7 @@ float proportional = 0.0;
 float integral = 0.0;  // Soma do erro
 float derivative = 0.0;  // Variação do erro
 unsigned long last_time = 0;  // Último tempo de atualização
-unsigned long dt = 10;  // Intervalo de tempo em milissegundos
+unsigned long dt = 5;  // Intervalo de tempo em milissegundos
 
 
 //Variaveis BME
@@ -244,7 +228,7 @@ int tempo_enchimento = 5000; //Tempo que a bomba fica ligada (ms)
 
 
 //Variaveis de deslocamento
-int velocidade_atual = 0; //-100 a 100, usar até 50
+float velocidade_atual = 0; //-100 a 100, usar até 50
 
 
 //bearing = angulo que deve ser apontado
@@ -252,7 +236,7 @@ int velocidade_atual = 0; //-100 a 100, usar até 50
 //
 
 
-int erro2 = 0;  
+float erro2 = 0;  
 
 int8_t percentualP = 100;
 int8_t percentualI = 100;
@@ -263,6 +247,8 @@ int8_t Vmax = 80;
 
 
 bool percursoConcluido = false;
+bool gpsvalid = false;
+int satconectados = 0;
 
 //--------------------------------------------Le coordenadas--------------------------------------------------------OK
 //Lê até 20 coordenadas disponibilizadas no arquivo "coordenadas.txt" dentro do cartão SD e armazena as instruções nas variaveis LatAlvo, LonAlvo, PontoLeitura e PontoColeta
@@ -311,16 +297,17 @@ void CalcDirecDist(float lat1, float lon1, float lat2, float lon2){ //Recebe coo
   //return bearing;
 }
 //-------------------------------Algoritmo PID e controle dos motores-----------------------------------------------OK
-void AtuaESCs(int ajuste){ //Envia velocidade e ajuste de direção aos motores (velocidade_atual)
+void AtuaESCs(float ajuste){ //Envia velocidade e ajuste de direção aos motores (velocidade_atual)
 //ajuste vai de 0 a 255
 //-100 é gira para UM LADO =, 100 é gira PARA O OUTRO
 //0 não faz correção
 
-  ESCA_Vel = map(velocidade_atual,-100,100,0,180) + map(ajuste,-100,100,0,180);
-  ESCB_Vel = map(velocidade_atual,-100,100,0,180) - map(ajuste,-100,100,0,180);
+  ESCA_Vel = int(map(velocidade_atual,-100,100,0,180) + map(ajuste,-100,100,-90,90));
+  ESCB_Vel = int(map(velocidade_atual,-100,100,0,180) - map(ajuste,-100,100,-90,90));
 
   if(ESCA_Vel > 180){ESCA_Vel = 180;}else if(ESCA_Vel<0){ESCA_Vel = 0;}
   if(ESCB_Vel > 180){ESCB_Vel = 180;}else if(ESCB_Vel<0){ESCB_Vel = 0;}
+
 
   ESCA.write(ESCA_Vel);
   ESCB.write(ESCB_Vel);
@@ -330,17 +317,24 @@ void CalculaPIDDirec(){ //Algoritmo genérico de controle PID com tempo de inter
   //O objetivo do erro é ser 0, então os valores precisam ir de -255 a 255
 
   if(millis() - last_time > dt){
-    error = bearing - direc; //Compara a direção apontada com a direção desejada
-    proportional = percentualP/100 * kp * error;
-    integral += percentualI/100 * ki * error * dt;
-    derivative = percentualD/100 * kd * (error - last_error) / dt;
+    //error = bearing - direc; //Compara a direção apontada com a direção desejada
+
+    error = direc - bearing;
+  if(error > 180){
+    error = 360 - direc + bearing;
+  }else if(error < -180){
+    error = 360 + direc - bearing;
+  }
+    error = map(error,-180,180,-100,100);
+    proportional = (float(percentualP)/100) * kp * error;
+    integral += (float(percentualI)/100) * ki * error * float(dt);
+    derivative = (float(percentualD)/100) * kd * (error - last_error) / float(dt);
     output = proportional + integral + derivative;
     if(output > 100){output = 100;}else if(output < -100){output = -100;} // Limita a saída do PID de -100 a 100 (%)
     last_error = error;
     last_time = millis();
     AtuaESCs(output);
 }
-
 }
 void parar_motores(){ //Função auxiliar para parar os motores
   ESCA.write(90);
@@ -356,7 +350,9 @@ void leGPS(){
   if(gps.location.isValid()){
     Latitude  = gps.location.lat(); // float ->aponta os dados atuais de latitude e longitude
     Longitude = gps.location.lng(); // float 
-  }
+    gpsvalid = true;
+    satconectados = gps.satellites.value();
+  }else{gpsvalid = false;}
 }
 //----------------------------------------------Calibra magnetometro------------------------------------------------OK
 void calibrar_qmc5883(){
@@ -533,10 +529,106 @@ void AtividadePonto(int ponto){
 }
 //------------------------------------------Função Navegar-------------------------------------------------
 void Navegar(){
-  delay(1000);
-  percursoConcluido = true;
 
+leGPS();
+if(gpsvalid){
+LatAlvo[QtdPontos] = Latitude; //Armazena o ponto atual como ultimo ponto (verificar depois de deixar como opcional)
+LonAlvo[QtdPontos] = Longitude;
+velocidade_atual = 100 * percentualV/100;
 
+for (int p = 0; p <= PontosLidos;p++){
+  do{
+    leGPS();
+    CalculaGraus();
+    
+    CalcDirecDist(Latitude,Longitude, LatAlvo[p], LonAlvo[p]); //retorna distancia e angulo do alvo
+    CalculaPIDDirec();
+    u8g2.firstPage();
+    do{//mostra status no display
+      u8g2.setFont(u8g2_font_7x14B_tf);
+      u8g2.drawStr(16,15,"Atual | Alvo");
+      u8g2.setCursor(110, 15);
+      u8g2.print(p);//Indica qual ponto está como alvo
+      u8g2.setFont(u8g2_font_squeezed_r6_tr);
+      u8g2.setCursor(1, 23);
+      u8g2.print(Latitude,8); //Coordenada atual Lat
+      u8g2.setCursor(60, 23);
+      u8g2.print("|");
+      u8g2.setCursor(65, 23);
+      u8g2.print(LatAlvo[p],8); //coordenada alvo Lat
+      u8g2.setCursor(1, 31);
+      u8g2.print(Longitude,8);  //Coordenada atual Lon
+      u8g2.setCursor(60, 31);
+      u8g2.print("|");
+      u8g2.setCursor(65, 31);
+      u8g2.print(LonAlvo[p],8); //coordenada alvo Lon
+      u8g2.setCursor(1, 38);
+      u8g2.print(direc,3);  //mostra direção apontada
+      u8g2.setCursor(60, 38);
+      u8g2.print("|");
+      u8g2.setCursor(65, 38);
+      u8g2.print(bearing,3);  //mostra direção que deve apontar
+      u8g2.setFont(u8g2_font_7x14_tf);
+      u8g2.setCursor(1, 53);
+      u8g2.print(distancia,1); //mostra distancia em metros
+      u8g2.setCursor(86, 53);
+      //u8g2.print( output);
+      u8g2.print("metros");
+
+    }while(u8g2.nextPage());
+  }while(distancia>10); //Fazer enquanto a distancia do ponto for maior que 10m
+  parar_motores();
+  AtividadePonto(p);  
+}
+
+  do{
+    velocidade_atual = 100 * float(percentualV) / 100;
+    CalcDirecDist(Latitude,Longitude, LatAlvo[QtdPontos], LonAlvo[QtdPontos]); //retorna distancia e angulo do alvo
+    CalculaPIDDirec();
+    u8g2.firstPage();
+    do{//mostra status no display
+      u8g2.setFont(u8g2_font_7x14B_tf);
+      u8g2.drawStr(18,15,"Atual | Alvo");
+      u8g2.setCursor(110, 15);
+      u8g2.print(QtdPontos);//Indica qual ponto está como alvo
+      u8g2.setFont(u8g2_font_squeezed_r6_tr);
+      u8g2.setCursor(1, 23);
+      u8g2.print(Latitude,8); //Coordenada atual Lat
+      u8g2.setCursor(60, 23);
+      u8g2.print("|");
+      u8g2.setCursor(65, 23);
+      u8g2.print(LatAlvo[QtdPontos],8); //coordenada alvo Lat
+      u8g2.setCursor(1, 31);
+      u8g2.print(Longitude,8);  //Coordenada atual Lon
+      u8g2.setCursor(60, 31);
+      u8g2.print("|");
+      u8g2.setCursor(65, 31);
+      u8g2.print(LonAlvo[QtdPontos],8); //coordenada alvo Lon
+      u8g2.setCursor(1, 38);
+      u8g2.print(direc,3);  //mostra direção apontada
+      u8g2.setCursor(60, 38);
+      u8g2.print("|");
+      u8g2.setCursor(65, 38);
+      u8g2.print(bearing,3);  //mostra direção que deve apontar
+      u8g2.setFont(u8g2_font_7x14_tf);
+      u8g2.setCursor(1, 53);
+      u8g2.print(distancia,1); //mostra distancia em metros
+      u8g2.setCursor(86, 53);
+      u8g2.print("metros");
+
+    }while(u8g2.nextPage());
+  }while(distancia>10); //Fazer enquanto a distancia do ponto for maior que 10m
+  parar_motores();
+}else{
+    u8g2.firstPage();
+    do{      
+      u8g2.setFont(u8g2_font_7x14B_tf);
+      u8g2.drawStr(1,15,"GPS invalido");
+      u8g2.drawStr(1,30,"Sats conectados");
+      u8g2.setCursor(110,30);
+      u8g2.print(satconectados);
+     }while(u8g2.nextPage());
+}
 }
 
 //------------------------------------------Mostra Tela-------------------------------------------------------------
@@ -634,20 +726,36 @@ void MostraTela(){
 
 
     case 4:
-    if(!percursoConcluido){
+    if(PontosLidos == 0){
         u8g2.firstPage();
       do{
         u8g2.setFont(u8g2_font_7x14B_tf);
-        u8g2.drawStr(4,15,"Navegando...");//cabe 12
+        u8g2.drawStr(29,15,"SEM DADOS!");
+        u8g2.setFont(u8g2_font_7x14_tf);
+        u8g2.drawStr(4,34,"Reinsira o cartao");
+        u8g2.drawStr(15,49,"com os dados e");
+        u8g2.drawStr(2,64,"reinicie o sistema");
       }while(u8g2.nextPage());
+    }else{
+    if(!percursoConcluido){
+      //  u8g2.firstPage();
+     // do{
+      //  u8g2.setFont(u8g2_font_7x14B_tf);
+      //  u8g2.drawStr(4,15,"Navegando...");//cabe 12
+      //}while(u8g2.nextPage());
       Navegar();
       }else{
         u8g2.firstPage();
       do{
         u8g2.setFont(u8g2_font_7x14B_tf);
-        u8g2.drawStr(4,15,"Percurso Finalizado!");//cabe 12
+        u8g2.drawStr(4,15,"Percurso");
+        u8g2.drawStr(47,30,"Finalizado!");
+        u8g2.setFont(u8g2_font_7x14_tf);
+        u8g2.drawStr(1,47,"Reinicie o sistema");
+        u8g2.drawStr(22,62,"para refazer");
+
       }while(u8g2.nextPage());
-  }
+  }}
       break;
 
     case 5: //Tela ler coordenadas do cartão SD 
